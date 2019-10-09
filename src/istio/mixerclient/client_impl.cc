@@ -76,103 +76,14 @@ void MixerClientImpl::Check(CheckContextSharedPtr &context,
                             const TransportCheckFunc &transport,
                             const CheckDoneFunc &on_done) {
   //
-  // Always check the policy cache
+  // Always check the policy from remote
   //
-
-  context->checkPolicyCache(*check_cache_);
-  ++total_check_calls_;
-
-  MIXER_DEBUG("Policy cache hit=%s, status=%s",
-              context->policyCacheHit() ? "true" : "false",
-              context->policyStatus().ToString().c_str());
-
-  if (context->policyCacheHit()) {
-    ++total_check_cache_hits_;
-
-    if (!context->policyStatus().ok()) {
-      //
-      // If the policy cache denies the request, immediately fail the request
-      //
-      ++total_check_cache_hit_denies_;
-      context->setFinalStatus(context->policyStatus());
-      on_done(*context);
-      return;
-    }
-
-    //
-    // If policy cache accepts the request and a quota check is not required,
-    // immediately accept the request.
-    //
-    ++total_check_cache_hit_accepts_;
-    if (!context->quotaCheckRequired()) {
-      context->setFinalStatus(context->policyStatus());
-      on_done(*context);
-      return;
-    }
-  } else {
-    ++total_check_cache_misses_;
-  }
-
-  bool remote_quota_prefetch{false};
-
-  if (context->quotaCheckRequired()) {
-    context->checkQuotaCache(*quota_cache_);
-    ++total_quota_calls_;
-
-    MIXER_DEBUG("Quota cache hit=%s, status=%s, remote_call=%s",
-                context->quotaCacheHit() ? "true" : "false",
-                context->quotaStatus().ToString().c_str(),
-                context->remoteQuotaRequestRequired() ? "true" : "false");
-
-    if (context->quotaCacheHit()) {
-      ++total_quota_cache_hits_;
-      if (context->quotaStatus().ok()) {
-        ++total_quota_cache_hit_accepts_;
-      } else {
-        ++total_quota_cache_hit_denies_;
-      }
-
-      if (context->policyCacheHit()) {
-        //
-        // If both policy and quota caches are hit, we can call the completion
-        // handler now.  However sometimes the quota cache's prefetch
-        // implementation will still need to send a request to the Mixer server
-        // in the background.
-        //
-        context->setFinalStatus(context->quotaStatus());
-        on_done(*context);
-        remote_quota_prefetch = context->remoteQuotaRequestRequired();
-        if (!remote_quota_prefetch) {
-          return;
-        }
-      }
-    } else {
-      ++total_quota_cache_misses_;
-    }
-  }
 
   // TODO(jblatt) mjog thinks this is a big CPU hog.  Look into it.
   context->compressRequest(
       compressor_,
       deduplication_id_base_ + std::to_string(deduplication_id_.fetch_add(1)));
 
-  //
-  // Classify and track reason for remote request
-  //
-
-  ++total_remote_calls_;
-
-  if (!context->policyCacheHit()) {
-    ++total_remote_check_calls_;
-  }
-
-  if (context->remoteQuotaRequestRequired()) {
-    ++total_remote_quota_calls_;
-  }
-
-  if (remote_quota_prefetch) {
-    ++total_remote_quota_prefetch_calls_;
-  }
 
   RemoteCheck(context, transport ? transport : options_.env.check_transport,
               remote_quota_prefetch ? nullptr : on_done);
